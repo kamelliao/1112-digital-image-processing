@@ -3,25 +3,25 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from utils import convolve, gaussian_kernel, plot_histogram
 
-class EdgeDetection:
-    def __init__(self):
-        pass
-
-    def thresholding(self):
-        pass
 
 # Sobel edge detection
+def sobel_edge_detection(img, threshold=100):
+    magn, orien = compute_gradient(img)
+    for j, k in np.ndindex(img.shape):
+        img[j, k] = 255 if magn[j, k] >= threshold else 0
+    return img
+
+
 def compute_gradient(img):
-    img_padded = np.pad(img, 1, mode='constant')
+    img_padded = np.pad(img, 1, mode='symmetric')
     windows = sliding_window_view(img_padded, (3, 3))
 
     grad_magn = np.zeros(img.shape)
     grad_orien = np.zeros(img.shape)
-    for j in range(img.shape[0]):
-        for k in range(img.shape[1]):
-            magn, orien = sobel_operator(windows[j, k])
-            grad_magn[j, k] = magn
-            grad_orien[j, k] = orien
+    for j, k in np.ndindex(img.shape):
+        magn, orien = sobel_operator(windows[j, k])
+        grad_magn[j, k] = magn
+        grad_orien[j, k] = orien
 
     return grad_magn, grad_orien
 
@@ -60,14 +60,13 @@ class CannyEdgeDetector:
     def non_maximal_suppression(self, magn, orien):
         magn_suppresed = magn.copy()
 
-        for j in range(magn.shape[0]):
-            for k in range(magn.shape[1]):
-                nn1, nn2 = self._nearest_neighbors(np.array([j, k]), orien[j, k])
-                if (
-                    (magn[j, k] <= magn[nn1[0], nn1[1]])
-                    or (magn[j, k] <= magn[nn2[0], nn2[1]])
-                ):
-                    magn_suppresed[j, k] = 0
+        for j, k in np.ndindex(magn.shape):
+            nn1, nn2 = self._nearest_neighbors(np.array([j, k]), orien[j, k])
+            if (
+                (magn[j, k] <= magn[nn1[0], nn1[1]])
+                or (magn[j, k] <= magn[nn2[0], nn2[1]])
+            ):
+                magn_suppresed[j, k] = 0
         return magn_suppresed
 
     def hysteretic_thresholding(self, magn):
@@ -153,6 +152,13 @@ laplacian_8nbrs_nonsep = (1/8)*np.array([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]
 laplacian_8nbrs_sep = (1/8)*np.array([[-2,  1, -2], [ 1, 4,  1], [-2,  1, -2]])
 
 def laplacian_of_gaussian(img):
+    '''
+    Parameters
+    ----------
+    sigma : float
+    r : int
+    threshold : float
+    '''
     gaussian = gaussian_kernel(3, 5)
     img = convolve(img, gaussian)
     img = convolve(img, laplacian_8nbrs_sep)
@@ -162,8 +168,8 @@ def laplacian_of_gaussian(img):
 
     # zero-crossing
     # 1 plot hitogram
-    hist = plot_histogram(img)
-    hist.savefig('hist.png')
+    # hist = plot_histogram(img)
+    # hist.savefig('hist.png')
 
     # 2 quantization
     threshold = 2
