@@ -1,16 +1,25 @@
 import cv2
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-from utils import convolve, gaussian_kernel, plot_histogram
+from utils import convolve, gaussian_kernel, plot_histogram, plot_cdf, NeighborFinder
 
 
 # Sobel edge detection
-def sobel_edge_detection(img, threshold=100):
+def sobel_edge_detection(img, threshold=None):
     magn, orien = compute_gradient(img)
-    for j, k in np.ndindex(img.shape):
-        img[j, k] = 255 if magn[j, k] >= threshold else 0
-    return img
 
+    # check cdf to determine threshold
+    # cdf = plot_cdf(magn)
+    # cdf.savefig('sobel_hist.png')
+
+    # output gradient map
+    if threshold == None:
+        return magn
+
+    # thresholding
+    for j, k in np.ndindex(img.shape):
+        magn[j, k] = 255 if magn[j, k] >= threshold else 0
+    return magn
 
 def compute_gradient(img):
     img_padded = np.pad(img, 1, mode='symmetric')
@@ -40,21 +49,23 @@ def sobel_operator(w):
 # Canny edge detection
 class CannyEdgeDetector:
     def __init__(self):
-        self.th_cand = 50
-        self.th_edge = 100
+        self.th_cand: int = None
+        self.th_edge: int = None
+        self.neighbor: str = None
 
         self.PIXEL_EDGE = 255
         self.PXIEL_CAND = 100
         self.PIXEL_NONE = 0
 
-    def __call__(self, img, th_cand=50, th_edge=100):
+    def __call__(self, img, th_cand, th_edge, neighbor):
         self.th_cand = th_cand
         self.th_edge = th_edge
 
+        img = convolve(img, gaussian_kernel(1, 3))  # noise reduction
         magn, orien = compute_gradient(img)
         magn = self.non_maximal_suppression(magn, orien)
         magn = self.hysteretic_thresholding(magn)
-        magn = self.connected_component_labeling(magn)
+        magn = self.connected_component_labeling(magn, neighbor)
         return magn
 
     def non_maximal_suppression(self, magn, orien):
@@ -63,8 +74,8 @@ class CannyEdgeDetector:
         for j, k in np.ndindex(magn.shape):
             nn1, nn2 = self._nearest_neighbors(np.array([j, k]), orien[j, k])
             if (
-                (magn[j, k] <= magn[nn1[0], nn1[1]])
-                or (magn[j, k] <= magn[nn2[0], nn2[1]])
+                (magn[j, k] < magn[nn1[0], nn1[1]])
+                or (magn[j, k] < magn[nn2[0], nn2[1]])
             ):
                 magn_suppresed[j, k] = 0
         return magn_suppresed
@@ -77,13 +88,13 @@ class CannyEdgeDetector:
         magn = quantized_values[bins_idx]
         return magn
 
-    def connected_component_labeling(self, img):
+    def connected_component_labeling(self, img, neighbor):
         h, w = img.shape
         
         # get coordinates of edge points
         j_ep, k_ep = np.where(img == self.PIXEL_EDGE)
 
-        get_neighbors = NeighborFinder(h, w, mode='eight')
+        get_neighbors = NeighborFinder(h, w, mode=neighbor)
         neighbors = get_neighbors(np.array([[j, k] for j, k in zip(j_ep, k_ep)]))
         neighbors = neighbors[img[neighbors.T[0], neighbors.T[1]] == 100].tolist()  # candidate neighbors
 
@@ -111,68 +122,37 @@ class CannyEdgeDetector:
         return nn1, nn2
 
 
-class NeighborFinder:
-    def __init__(self, h, w, mode='eight'):
-        self.h = h
-        self.w = w
-        self.mode = mode
-
-    def __call__(self, points: np.ndarray):
-        '''
-        Parameters
-        ----------
-        points : ndarray of shape (N, 2)
-
-        Returns
-        -------
-        neighbors : ndarray of shape (N_neighbors, 2)
-        '''
-        if self.mode == 'eight':
-            offsets = np.array(np.meshgrid(np.arange(-1, 2), np.arange(-1, 2))).T.reshape(9, 2)
-        else:
-            offsets = np.array([[-1, 0], [0, -1], [1, 0], [0, 1]])  # four neighbor
-        
-        neighbors = np.expand_dims(points, axis=1) + offsets
-        neighbors = neighbors.reshape(neighbors.shape[0]*neighbors.shape[1], 2)
-
-        # validate coordinates
-        neighbors = neighbors[
-            (neighbors[:, 0] >= 0)  # neighbors[:, 0]===neighbors.T[0] coorespond to j
-            & (neighbors[:, 0] < self.h)
-            & (neighbors[:, 1] >= 0)  # neighbors[:, 1]===neighbors.T[1] coorespond to k
-            & (neighbors[:, 1] < self.w)
-        ]
-        
-        return neighbors
-
-
 # Laplacian of Gaussian edge detection
-laplacian_4nbrs = (1/4)*np.array([[ 0, -1,  0], [-1, 4, -1], [ 0, -1,  0]])
-laplacian_8nbrs_nonsep = (1/8)*np.array([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]])
-laplacian_8nbrs_sep = (1/8)*np.array([[-2,  1, -2], [ 1, 4,  1], [-2,  1, -2]])
+laplacians = {
+    'four': (1/4)*np.array([[ 0, -1,  0], [-1, 4, -1], [ 0, -1,  0]]),
+    'eight_sep': (1/8)*np.array([[-2,  1, -2], [ 1, 4,  1], [-2,  1, -2]]),
+    'eight_nonsep': (1/8)*np.array([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]]),
+}
 
-def laplacian_of_gaussian(img):
+def laplacian_of_gaussian(img, sigma=3, r=5, neighbor='eight_sep', grad=False, threshold=2):
     '''
     Parameters
     ----------
     sigma : float
     r : int
     threshold : float
+    neighbor : 
     '''
-    gaussian = gaussian_kernel(3, 5)
+    gaussian = gaussian_kernel(sigma, r)
     img = convolve(img, gaussian)
-    img = convolve(img, laplacian_8nbrs_sep)
+    img = convolve(img, laplacians.get(neighbor))
 
-    # visiualize gradient map (second-order)
-    # img = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    # output gradient map (second-order)
+    if grad:
+        img = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+        return img
 
     # zero-crossing
     # 1 plot hitogram
     # hist = plot_histogram(img)
-    # hist.savefig('hist.png')
+    # hist.savefig('report_images/hist-log.png')
 
     # 2 quantization
-    threshold = 2
     quantized_value = np.array([-1, 0, 1])
     idx = np.digitize(img, bins=[-threshold, threshold])
     img = quantized_value[idx]
@@ -211,15 +191,5 @@ def edge_crispening(img, L=3, c=0.7):
     lowpass_filter = gaussian_kernel(1, L)
     low_component = convolve(img, lowpass_filter)
     
-    img = (c/(2*c-1))*img - ((1-c)/(2*c-1))*low_component
+    img = (c/(2*c-1))*img + ((c-1)/(2*c-1))*low_component
     return img
-
-# Hough transform
-
-if __name__ == '__main__':
-    # img = cv2.imread('hw2_sample_images/sample1.png', cv2.IMREAD_GRAYSCALE)
-    # result = laplacian_of_gaussian(img)
-    # cv2.imwrite('result4.jpg', result)
-    img = cv2.imread('hw2_sample_images/sample2.png', cv2.IMREAD_GRAYSCALE)
-    result = edge_crispening(img)
-    cv2.imwrite('result5.jpg', result)

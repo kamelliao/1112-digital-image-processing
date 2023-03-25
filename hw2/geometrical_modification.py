@@ -101,8 +101,8 @@ def popcat(org_coord, center):
 
     # note: clip to center
     new_coord = np.vstack([
-        org_coord[0] + (np.clip(8*norm.max()/(norm+1), 0, a_max=norm))*np.cos(orien),
-        org_coord[1] + (np.clip(8*norm.max()/(norm+1), 0, a_max=norm))*np.sin(orien)
+        org_coord[0] + (np.clip((norm.max()/(norm+1))**2.3, 0, a_max=norm))*np.cos(orien),
+        org_coord[1] + (np.clip((norm.max()/(norm+1))**2.3, 0, a_max=norm))*np.sin(orien)
     ]).astype(int)
     return new_coord
 
