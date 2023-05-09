@@ -53,4 +53,5 @@ mark_inset(axes[0], axz0, loc1=1, loc2=3, fc="none", ec="0.5")
 mark_inset(axes[1], axz1, loc1=1, loc2=3, fc="none", ec="0.5")
 
 plt.tight_layout()
-plt.show()
+# plt.show()
+plt.savefig('report_images/cat-compare.png', dpi=600, bbox_inches='tight')
